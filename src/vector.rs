@@ -13,17 +13,27 @@ use alloc::alloc::{
     Layout
 };
 
+const fn get_starting_cap<T>() -> usize {
+    if mem::size_of::<T>() == 0 {
+        usize::MAX
+    } else {
+        0
+    }
+}
+
 pub struct Vec<T> {
     ptr: NonNull<T>,
     cap: usize,
     len: usize
 }
 
+
+
 impl<T> Vec<T> {
     pub fn new() -> Self {
         Self{
             ptr: NonNull::dangling(),
-            cap: 0,
+            cap: get_starting_cap::<T>(),
             len: 0
         }
     }
@@ -58,7 +68,11 @@ impl<T> Vec<T> {
         }
     }
 
-    fn with_capacity(cap: usize) -> Self {
+    pub fn with_capacity(cap: usize) -> Self {
+        if cap == 0 || mem::size_of::<T>() == 0 {
+            return Self::new();
+        }
+
         let size: usize = mem::size_of::<T>().checked_mul(cap).unwrap();
         let layout = Self::get_layout(size);
 
@@ -100,11 +114,31 @@ impl<T> Vec<T> {
         self.ptr = new_ptr.cast::<T>();
     }
 
-    fn amortized_cap_for(&self, min_size: usize) -> usize {
-        core::cmp::max(self.cap * 2, min_size)
+    const fn min_non_zero_cap(size: usize) -> usize {
+        if size == 1 {
+            8
+        } else if size <= 1024 {
+            4
+        } else {
+            1
+        }
     }
 
+    fn amortized_cap_for(&self, min_size: usize) -> usize {
+        let bruh = core::cmp::max(self.cap * 2, min_size);
+        let gay = Self::min_non_zero_cap(mem::size_of::<T>());
+        core::cmp::max(bruh, gay)
+    }
+
+    #[inline(never)]
     fn grow(&mut self, additional_size: usize) {
+        if self.cap == 0 {
+            let gay = Self::min_non_zero_cap(mem::size_of::<T>());
+            let new_cap = core::cmp::max(additional_size, gay);
+            *self = Self::with_capacity(new_cap);
+            return;
+        }
+
         let requested_cap = self.len
             .checked_add(additional_size)
             .unwrap();
@@ -157,6 +191,26 @@ impl<T> Vec<T> {
             None
         }
     }
+
+    #[inline(always)]
+    pub unsafe fn pop_unchecked(&mut self) -> T {
+        debug_assert!(self.len > 0);
+        self.len -= 1;
+
+        unsafe {
+            self.ptr.add(self.len).read()
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == 0 {
+            return None;
+        }
+
+        unsafe {
+            Some(self.pop_unchecked())
+        }
+    }
 }
 
 // pub trait Index<Idx>where
@@ -172,5 +226,41 @@ impl<T> Index<usize> for Vec<T> {
 
     fn index(&self, index: usize) -> &Self::Output {
         self.get(index).unwrap()
+    }
+}
+
+impl<T,V> Index<Vec<V>> for Vec<T> {
+    type Output = T;
+
+    fn index(&self, index: Vec<V>) -> &Self::Output {
+        self.get(index.len).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn pj_ball_stink() {
+        let mut thing = Vec::new();
+
+        for i in 0..10 {
+            thing.push(i);
+        }
+
+        assert!(thing.len == 10);
+    }
+
+    #[test]
+    fn pj_ball_stick() {
+        let mut thing = Vec::new();
+
+        for i in 0..=10 {
+            thing.push(i);
+        }
+
+        assert_eq!(thing.len, 11);
+        assert_eq!(thing.pop().unwrap(), 10);
     }
 }
